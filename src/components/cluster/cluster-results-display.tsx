@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { ClusteringResult } from '@/types';
@@ -7,12 +8,12 @@ import { CheckCircle, AlertTriangle, XCircle, Info } from 'lucide-react';
 
 interface ClusterResultsDisplayProps {
   results: ClusteringResult | null;
-  isProcessing: boolean;
+  isProcessing: boolean; 
 }
 
 export function ClusterResultsDisplay({ results, isProcessing }: ClusterResultsDisplayProps) {
   if (isProcessing) {
-    return null; // Or a specific loading state for this component if desired
+    return null;
   }
 
   if (!results) {
@@ -35,6 +36,19 @@ export function ClusterResultsDisplay({ results, isProcessing }: ClusterResultsD
     <Card className="w-full max-w-lg mt-8 shadow-lg">
       <CardHeader>
         <CardTitle className="font-headline text-2xl">Clustering Output</CardTitle>
+        {results.clusters && results.clusters.length > 0 && !results.error && (
+            <CardDescription>Clustering process completed.</CardDescription>
+        )}
+         {results.error && (
+            <CardDescription>An error occurred during processing.</CardDescription>
+        )}
+        {results.warning && !results.error && (
+             <CardDescription>Process completed with warnings.</CardDescription>
+        )}
+         {results.clusters && results.clusters.length === 0 && !results.warning && !results.error && (
+            <CardDescription>Process completed, but no clusters were formed.</CardDescription>
+        )}
+
       </CardHeader>
       <CardContent>
         {results.error && (
@@ -51,7 +65,7 @@ export function ClusterResultsDisplay({ results, isProcessing }: ClusterResultsD
             <AlertDescription className="whitespace-pre-line">{results.warning}</AlertDescription>
           </Alert>
         )}
-        {results.clusters && results.clusters.length > 0 && (
+        {results.clusters && results.clusters.length > 0 && !results.error && (
           <div>
             <Alert variant="default" className="mb-4 border-green-500/50 text-green-700 dark:border-green-400/50 dark:text-green-300 [&>svg]:text-green-600 dark:[&>svg]:text-green-400">
               <CheckCircle className="h-5 w-5" />
@@ -72,7 +86,7 @@ export function ClusterResultsDisplay({ results, isProcessing }: ClusterResultsD
            <Alert variant="default" className="mb-4">
             <Info className="h-5 w-5" />
             <AlertTitle>No Clusters Formed</AlertTitle>
-            <AlertDescription>The algorithm did not form any clusters based on the provided data and parameters, but no specific warnings were generated. This might happen with very sparse data or strict constraints.</AlertDescription>
+            <AlertDescription>The algorithm did not form any clusters based on the provided data and parameters. This might happen with very sparse data or strict constraints. Consider adjusting parameters.</AlertDescription>
           </Alert>
         )}
       </CardContent>
