@@ -5,11 +5,25 @@ import type { ClusteringResult } from '@/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { CheckCircle, AlertTriangle, XCircle, Info } from 'lucide-react';
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis, LabelList, ResponsiveContainer } from 'recharts';
+import {
+  ChartConfig,
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@/components/ui/chart";
 
 interface ClusterResultsDisplayProps {
   results: ClusteringResult | null;
-  isProcessing: boolean; 
+  isProcessing: boolean;
 }
+
+const chartConfig = {
+  members: {
+    label: "Members",
+    color: "hsl(var(--chart-1))",
+  },
+} satisfies ChartConfig;
 
 export function ClusterResultsDisplay({ results, isProcessing }: ClusterResultsDisplayProps) {
   if (isProcessing) {
@@ -32,6 +46,13 @@ export function ClusterResultsDisplay({ results, isProcessing }: ClusterResultsD
     );
   }
 
+  const chartData = results.clusters && results.clusters.length > 0
+    ? results.clusters.map(cluster => ({
+        name: `Cluster ${cluster.id}`,
+        members: cluster.members.length,
+      }))
+    : [];
+
   return (
     <Card className="w-full max-w-lg mt-8 shadow-lg">
       <CardHeader>
@@ -48,9 +69,8 @@ export function ClusterResultsDisplay({ results, isProcessing }: ClusterResultsD
          {results.clusters && results.clusters.length === 0 && !results.warning && !results.error && (
             <CardDescription>Process completed, but no clusters were formed.</CardDescription>
         )}
-
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-6">
         {results.error && (
           <Alert variant="destructive" className="mb-4">
             <XCircle className="h-5 w-5" />
@@ -73,13 +93,47 @@ export function ClusterResultsDisplay({ results, isProcessing }: ClusterResultsD
               <AlertDescription>Clustering completed successfully.</AlertDescription>
             </Alert>
             <h3 className="font-semibold text-lg mb-2 text-foreground">Generated Clusters:</h3>
-            <ul className="space-y-1 list-disc list-inside text-foreground">
+            <ul className="space-y-1 list-disc list-inside text-foreground mb-6">
               {results.clusters.map(cluster => (
                 <li key={cluster.id}>
                   <span className="font-medium">Cluster {cluster.id}:</span> {cluster.members.join(', ')}
                 </li>
               ))}
             </ul>
+
+            <h3 className="font-semibold text-lg mb-2 text-foreground">Cluster Sizes:</h3>
+            <ChartContainer config={chartConfig} className="min-h-[200px] w-full">
+              <BarChart accessibilityLayer data={chartData} margin={{ top: 20, right: 0, left: -20, bottom: 5 }}>
+                <CartesianGrid vertical={false} />
+                <XAxis
+                  dataKey="name"
+                  tickLine={false}
+                  tickMargin={10}
+                  axisLine={false}
+                />
+                <YAxis
+                  dataKey="members"
+                  allowDecimals={false}
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={10}
+                  label={{ value: "Points", angle: -90, position: 'insideLeft', offset:10 }}
+                />
+                <ChartTooltip
+                  cursor={false}
+                  content={<ChartTooltipContent indicator="dashed" />}
+                />
+                <Bar dataKey="members" fill="var(--color-members)" radius={4}>
+                  <LabelList
+                    dataKey="members"
+                    position="top"
+                    offset={8}
+                    className="fill-foreground"
+                    fontSize={12}
+                  />
+                </Bar>
+              </BarChart>
+            </ChartContainer>
           </div>
         )}
         {results.clusters && results.clusters.length === 0 && !results.warning && !results.error && (
