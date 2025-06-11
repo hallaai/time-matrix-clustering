@@ -15,7 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 
 export type ProcessingStatus = 'idle' | 'reading_file' | 'clustering';
 
-const ClusterMapDisplay = dynamic(() => import('@/components/map/ClusterMapDisplay'), { 
+const ClusterMapDisplay = dynamic(() => import('@/components/map/ClusterMapDisplay'), {
   ssr: false,
   loading: () => (
     <div className="flex flex-col items-center justify-center text-muted-foreground p-8 rounded-lg w-full max-w-4xl h-96 border shadow-lg">
@@ -47,15 +47,15 @@ export default function HomePage() {
       setClusteringProgress(0);
       let currentProgress = 0;
       interval = setInterval(() => {
-        currentProgress += 5; 
+        currentProgress += 5;
         if (currentProgress <= 100) {
           setClusteringProgress(currentProgress);
         } else {
           clearInterval(interval);
         }
-      }, 75); 
+      }, 75);
     } else {
-      setClusteringProgress(0); 
+      setClusteringProgress(0);
     }
     return () => clearInterval(interval);
   }, [processingStatus]);
@@ -70,7 +70,7 @@ export default function HomePage() {
     setLocationData(data);
     setLocationDataError(error || null);
     if (error) {
-       setShowMap(false); 
+       setShowMap(false);
     }
   };
 
@@ -94,7 +94,7 @@ export default function HomePage() {
     if (clusterPoints.size > 0 && locationPoints.size === 0) {
         return { canDrawMap: false, mapButtonTooltip: "Location data is empty, cannot map cluster points." };
     }
-    
+
     for (const point of Array.from(clusterPoints)) {
       if (!locationPoints.has(point)) {
         return { canDrawMap: false, mapButtonTooltip: `Point ${point} from clusters not found in location data.` };
@@ -125,8 +125,8 @@ export default function HomePage() {
     <>
       <SiteHeader />
       <main className="flex-1 flex flex-col items-center justify-start p-6 md:p-12 space-y-8">
-        <ClusterForm 
-          onResultsChange={setResults} 
+        <ClusterForm
+          onResultsChange={setResults}
           onProcessingStatusChange={setProcessingStatus}
           currentProcessingStatus={processingStatus}
           onLocationDataChange={handleLocationDataChange}
@@ -148,7 +148,7 @@ export default function HomePage() {
         )}
 
         <ClusterResultsDisplay results={results} isProcessing={processingStatus !== 'idle'} />
-        
+
         {results && results.clusters && results.clusters.length > 0 && (
           <div className="w-full max-w-lg flex justify-center">
             <Button onClick={handleDrawOnMap} disabled={!canDrawMap} title={mapButtonTooltip}>
@@ -166,11 +166,13 @@ export default function HomePage() {
         )}
 
         {showMap && results && locationData && (
-          <div className="w-full max-w-4xl h-[500px] mt-8 rounded-lg shadow-xl border overflow-hidden">
-            <ClusterMapDisplay 
-              key={mapRenderKey}
-              clusters={results.clusters || []} 
-              locations={locationData} 
+          <div
+            key={mapRenderKey} // Moved key to the parent div
+            className="w-full max-w-4xl h-[500px] mt-8 rounded-lg shadow-xl border overflow-hidden"
+          >
+            <ClusterMapDisplay
+              clusters={results.clusters || []}
+              locations={locationData}
             />
           </div>
         )}
