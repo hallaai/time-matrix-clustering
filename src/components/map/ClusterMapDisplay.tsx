@@ -2,13 +2,13 @@
 "use client";
 
 import React, { useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from 'react-leaflet';
+import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
 import type { LatLngExpression } from 'leaflet';
 import type { Cluster, LocationData, LocationEntry } from '@/types';
 
 interface ClusterMapDisplayProps {
   clusters: Cluster[];
-  locations: LocationData;
+  locations: LocationData; // Assumed to be non-null by HomePage's conditional render
 }
 
 // Predefined distinct colors for clusters
@@ -29,7 +29,10 @@ const UNCLUSTERED_COLOR = '#808080'; // Grey for unclustered points
 export default function ClusterMapDisplay({ clusters, locations }: ClusterMapDisplayProps) {
   const locationsMap = useMemo(() => {
     const map = new Map<number, LocationEntry>();
-    locations.forEach(loc => map.set(loc.point, loc));
+    // Defensive check, though HomePage should ensure locations is an array
+    if (locations && Array.isArray(locations)) {
+      locations.forEach(loc => map.set(loc.point, loc));
+    }
     return map;
   }, [locations]);
 
@@ -38,6 +41,7 @@ export default function ClusterMapDisplay({ clusters, locations }: ClusterMapDis
     const points: (LocationEntry & { clusterId?: number; color: string })[] = [];
 
     // Add clustered points
+    // clusters prop is guaranteed to be an array by HomePage (results.clusters || [])
     clusters.forEach((cluster, clusterIndex) => {
       const color = DEFAULT_CLUSTER_COLORS[clusterIndex % DEFAULT_CLUSTER_COLORS.length];
       cluster.members.forEach(pointId => {
@@ -49,13 +53,16 @@ export default function ClusterMapDisplay({ clusters, locations }: ClusterMapDis
       });
     });
 
-    // Add unclustered points from the locations file that were not in any displayed cluster
-    locations.forEach(loc => {
-      if (!displayedPoints.has(loc.point)) {
-        points.push({ ...loc, color: UNCLUSTERED_COLOR });
-         displayedPoints.add(loc.point); // Ensure it's not added again if it was somehow missed
-      }
-    });
+    // Add unclustered points from the locations file
+    // Defensive check, though HomePage should ensure locations is an array
+    if (locations && Array.isArray(locations)) {
+      locations.forEach(loc => {
+        if (!displayedPoints.has(loc.point)) {
+          points.push({ ...loc, color: UNCLUSTERED_COLOR });
+          displayedPoints.add(loc.point); 
+        }
+      });
+    }
     
     return points;
 
@@ -72,8 +79,7 @@ export default function ClusterMapDisplay({ clusters, locations }: ClusterMapDis
 
   // Calculate center of the map based on available points
   const getMapCenter = (): LatLngExpression => {
-    if (pointsToDisplay.length === 0) return [60.1695, 24.9354]; // Default to Helsinki
-    
+    // pointsToDisplay.length is checked above, so it's > 0 here
     let totalLat = 0;
     let totalLon = 0;
     pointsToDisplay.forEach(p => {
