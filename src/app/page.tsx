@@ -34,6 +34,7 @@ export default function HomePage() {
   const [locationDataError, setLocationDataError] = useState<string | null>(null);
   const [showMap, setShowMap] = useState(false);
   const [footerYear, setFooterYear] = useState<number | null>(null);
+  const [mapRenderKey, setMapRenderKey] = useState(0);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -46,24 +47,30 @@ export default function HomePage() {
       setClusteringProgress(0);
       let currentProgress = 0;
       interval = setInterval(() => {
-        currentProgress += 5; // Adjust increment for smoother/faster progress
+        currentProgress += 5; 
         if (currentProgress <= 100) {
           setClusteringProgress(currentProgress);
         } else {
           clearInterval(interval);
         }
-      }, 75); // Adjust interval time (1500ms / 20 steps = 75ms)
+      }, 75); 
     } else {
-      setClusteringProgress(0); // Reset if not clustering
+      setClusteringProgress(0); 
     }
     return () => clearInterval(interval);
   }, [processingStatus]);
+
+  useEffect(() => {
+    if (showMap) {
+      setMapRenderKey(prevKey => prevKey + 1);
+    }
+  }, [showMap]);
 
   const handleLocationDataChange = (data: LocationData | null, error?: string) => {
     setLocationData(data);
     setLocationDataError(error || null);
     if (error) {
-       setShowMap(false); // Hide map if there's an error with location data
+       setShowMap(false); 
     }
   };
 
@@ -88,7 +95,6 @@ export default function HomePage() {
         return { canDrawMap: false, mapButtonTooltip: "Location data is empty, cannot map cluster points." };
     }
     
-    // Check if all cluster points are in location data
     for (const point of Array.from(clusterPoints)) {
       if (!locationPoints.has(point)) {
         return { canDrawMap: false, mapButtonTooltip: `Point ${point} from clusters not found in location data.` };
@@ -162,6 +168,7 @@ export default function HomePage() {
         {showMap && results && locationData && (
           <div className="w-full max-w-4xl h-[500px] mt-8 rounded-lg shadow-xl border overflow-hidden">
             <ClusterMapDisplay 
+              key={mapRenderKey}
               clusters={results.clusters || []} 
               locations={locationData} 
             />
