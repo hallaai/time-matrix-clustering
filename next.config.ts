@@ -1,3 +1,4 @@
+
 import type {NextConfig} from 'next';
 
 const nextConfig: NextConfig = {
@@ -16,6 +17,14 @@ const nextConfig: NextConfig = {
         port: '',
         pathname: '/**',
       },
+      { // Added for Leaflet tiles
+        protocol: 'https',
+        hostname: '*.tile.openstreetmap.org', 
+      },
+       { // Added for unpkg for leaflet css if not using direct link in head
+        protocol: 'https',
+        hostname: 'unpkg.com',
+      }
     ],
   },
 };

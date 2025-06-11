@@ -4,8 +4,8 @@
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { ClusterFormSchema, type ClusterFormValues } from '@/lib/schemas';
-import type { ClusteringResult } from '@/types';
+import { ClusterFormSchema, type ClusterFormValues, LocationsFileSchema } from '@/lib/schemas';
+import type { ClusteringResult, LocationData } from '@/types';
 import type { ProcessingStatus } from '@/app/page';
 import { runClusteringAlgorithm } from '@/lib/actions';
 
@@ -22,10 +22,12 @@ interface ClusterFormProps {
   onResultsChange: (results: ClusteringResult | null) => void;
   onProcessingStatusChange: (status: ProcessingStatus) => void;
   currentProcessingStatus: ProcessingStatus;
+  onLocationDataChange: (data: LocationData | null, error?: string) => void;
 }
 
-export function ClusterForm({ onResultsChange, onProcessingStatusChange, currentProcessingStatus }: ClusterFormProps) {
-  const [fileName, setFileName] = useState<string | null>(null);
+export function ClusterForm({ onResultsChange, onProcessingStatusChange, currentProcessingStatus, onLocationDataChange }: ClusterFormProps) {
+  const [distanceMatrixFileName, setDistanceMatrixFileName] = useState<string | null>(null);
+  const [locationsFileName, setLocationsFileName] = useState<string | null>(null);
   const { toast } = useToast();
 
   const form = useForm<ClusterFormValues>({
@@ -37,14 +39,59 @@ export function ClusterForm({ onResultsChange, onProcessingStatusChange, current
     },
   });
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleDistanceMatrixFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      setFileName(file.name);
+      setDistanceMatrixFileName(file.name);
     } else {
-      setFileName(null);
+      setDistanceMatrixFileName(null);
     }
   };
+  
+  const handleLocationsFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setLocationsFileName(file.name);
+      // Process locations file immediately for validation feedback
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const fileContent = e.target?.result as string;
+          const parsedLocations = JSON.parse(fileContent);
+          const validationResult = LocationsFileSchema.safeParse(parsedLocations);
+          if (!validationResult.success) {
+            const errorDetail = validationResult.error.flatten().fieldErrors;
+            const errorMsg = "Invalid locations file format. Check structure and data types (name: string, lat/lon: number, point: integer). Details: " + JSON.stringify(errorDetail);
+            toast({ title: "Locations File Error", description: errorMsg, variant: "destructive", duration: 9000 });
+            onLocationDataChange(null, errorMsg);
+            form.setError("locationsFile", { type: "manual", message: "Invalid locations file format."});
+            setLocationsFileName(`Error with ${file.name}`);
+          } else {
+            onLocationDataChange(validationResult.data);
+            toast({ title: "Locations File Loaded", description: `${file.name} processed successfully.`, variant: "default" });
+          }
+        } catch (err) {
+          const errorMsg = "Failed to parse locations JSON. Ensure it's valid JSON.";
+          toast({ title: "Locations File Error", description: errorMsg, variant: "destructive" });
+          onLocationDataChange(null, errorMsg);
+          form.setError("locationsFile", { type: "manual", message: errorMsg});
+           setLocationsFileName(`Error with ${file.name}`);
+        }
+      };
+      reader.onerror = () => {
+        const errorMsg = "Failed to read the locations file.";
+        toast({ title: "Locations File Error", description: errorMsg, variant: "destructive" });
+        onLocationDataChange(null, errorMsg);
+        form.setError("locationsFile", { type: "manual", message: errorMsg});
+        setLocationsFileName(`Error with ${file.name}`);
+      };
+      reader.readAsText(file);
+    } else {
+      setLocationsFileName(null);
+      onLocationDataChange(null); // Clear data if file is removed
+    }
+  };
+
 
   async function onSubmit(values: ClusterFormValues) {
     onProcessingStatusChange('reading_file');
@@ -54,12 +101,38 @@ export function ClusterForm({ onResultsChange, onProcessingStatusChange, current
     if (!file) {
       toast({
         title: "Error",
-        description: "No file selected.",
+        description: "No distance matrix file selected.",
         variant: "destructive",
       });
       onProcessingStatusChange('idle');
       return;
     }
+
+    // Process locations file if not already done (e.g., if user didn't blur/change after selecting)
+    // This is a bit redundant if handleLocationsFileChange always fires and succeeds.
+    if (values.locationsFile && values.locationsFile[0] && !locationsFileName?.startsWith("Error")) {
+        const locFile = values.locationsFile[0];
+        if (!locationsFileName || (locationsFileName && locFile.name !== locationsFileName.replace("Error with ", ""))) {
+            // Manually trigger processing if it seems out of sync or wasn't processed successfully
+             const reader = new FileReader();
+              reader.onload = (e) => {
+                try {
+                  const fileContent = e.target?.result as string;
+                  const parsedLocations = JSON.parse(fileContent);
+                  const validationResult = LocationsFileSchema.safeParse(parsedLocations);
+                  if (!validationResult.success) {
+                     onLocationDataChange(null, "Invalid locations file format.");
+                  } else {
+                     onLocationDataChange(validationResult.data);
+                  }
+                } catch (err) {
+                   onLocationDataChange(null, "Failed to parse locations JSON.");
+                }
+              };
+              reader.readAsText(locFile);
+        }
+    }
+
 
     const reader = new FileReader();
     
@@ -100,10 +173,10 @@ export function ClusterForm({ onResultsChange, onProcessingStatusChange, current
       }
     };
     reader.onerror = () => {
-      onResultsChange({ error: 'Failed to read the uploaded file.' });
+      onResultsChange({ error: 'Failed to read the uploaded distance matrix file.' });
       toast({
         title: "File Read Error",
-        description: "Failed to read the uploaded file.",
+        description: "Failed to read the uploaded distance matrix file.",
         variant: "destructive",
       });
       onProcessingStatusChange('idle');
@@ -117,7 +190,7 @@ export function ClusterForm({ onResultsChange, onProcessingStatusChange, current
     <Card className={cn("w-full max-w-lg shadow-lg", { 'opacity-70': isFormEffectivelyDisabled })}>
       <CardHeader>
         <CardTitle className="font-headline text-2xl">Configure Clustering</CardTitle>
-        <CardDescription>Upload your distance matrix (JSON) and set parameters.</CardDescription>
+        <CardDescription>Upload data files (JSON) and set parameters.</CardDescription>
       </CardHeader>
       <CardContent>
         <Form {...form}>
@@ -136,16 +209,41 @@ export function ClusterForm({ onResultsChange, onProcessingStatusChange, current
                         accept=".json"
                         onChange={(e) => {
                           field.onChange(e.target.files);
-                          handleFileChange(e);
+                          handleDistanceMatrixFileChange(e);
                         }}
                         className="text-foreground"
                       />
                     </FormControl>
-                    {fileName && <p className="text-sm text-muted-foreground mt-1">Selected: {fileName}</p>}
+                    {distanceMatrixFileName && <p className="text-sm text-muted-foreground mt-1">Selected: {distanceMatrixFileName}</p>}
                     <FormMessage />
                   </FormItem>
                 )}
               />
+
+              <FormField
+                control={form.control}
+                name="locationsFile"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel htmlFor="locationsFile">Locations File (.json)</FormLabel>
+                    <FormControl>
+                      <Input
+                        id="locationsFile"
+                        type="file"
+                        accept=".json"
+                        onChange={(e) => {
+                          field.onChange(e.target.files);
+                          handleLocationsFileChange(e);
+                        }}
+                        className="text-foreground"
+                      />
+                    </FormControl>
+                    {locationsFileName && <p className={cn("text-sm mt-1", locationsFileName.startsWith("Error") ? "text-destructive" : "text-muted-foreground")}>Selected: {locationsFileName}</p>}
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <FormField

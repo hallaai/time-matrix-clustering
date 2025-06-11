@@ -1,3 +1,4 @@
+
 export interface DistanceEntry {
   from: number;
   to: number;
@@ -26,3 +27,12 @@ export interface ClusteringResult {
   warning?: string;
   error?: string; // For critical API call errors
 }
+
+export interface LocationEntry {
+  name: string;
+  lat: number;
+  lon: number;
+  point: number;
+}
+
+export type LocationData = LocationEntry[];
