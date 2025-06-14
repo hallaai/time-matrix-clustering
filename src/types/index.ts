@@ -1,4 +1,3 @@
-
 export interface DistanceEntry {
   from: number;
   to: number;
@@ -44,3 +43,7 @@ export interface LocationEntry {
 }
 
 export type LocationData = LocationEntry[];
+
+export interface ClusterMapDisplayProps {
+  works?: any[]; // Newly added property
+}
