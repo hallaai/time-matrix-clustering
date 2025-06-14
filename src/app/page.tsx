@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { SiteHeader } from '@/components/layout/site-header';
 import { ClusterForm } from '@/components/cluster/cluster-form';
@@ -46,8 +46,8 @@ export default function HomePage() {
     if (processingStatus === 'clustering') {
       setClusteringProgress(0);
       let currentProgress = 0;
-      const totalDuration = 1500; // Corresponds to sleep in actions.ts
-      const steps = 20; // Number of updates
+      const totalDuration = 1500; 
+      const steps = 20; 
       const increment = 100 / steps;
       const intervalTime = totalDuration / steps;
 
@@ -56,7 +56,7 @@ export default function HomePage() {
         if (currentProgress <= 100) {
           setClusteringProgress(currentProgress);
         } else {
-          setClusteringProgress(100); // Ensure it hits 100
+          setClusteringProgress(100); 
           clearInterval(interval);
         }
       }, intervalTime);
@@ -66,22 +66,20 @@ export default function HomePage() {
     return () => clearInterval(interval);
   }, [processingStatus]);
 
-  useEffect(() => {
-    if (showMap) {
-      setMapRenderKey(prevKey => prevKey + 1);
-    }
-  }, [showMap]);
-
   const handleLocationDataChange = (data: LocationData | null, error?: string) => {
     setLocationData(data);
     setLocationDataError(error || null);
     if (error) {
-       setShowMap(false);
+       setShowMap(false); // Hide map if new location data has errors
     }
   };
 
   const { canDrawMap, mapButtonTooltip } = useMemo(() => {
     if (!results || !results.chosenClusters || results.chosenClusters.length === 0) {
+      // If location data exists, allow drawing unclustered points
+      if (locationData && (!locationDataError)) {
+          return { canDrawMap: true, mapButtonTooltip: "Draw available locations on map (no clusters to color)."};
+      }
       return { canDrawMap: false, mapButtonTooltip: "Perform clustering first or no valid clusters were formed." };
     }
     if (!locationData) {
@@ -91,19 +89,15 @@ export default function HomePage() {
         return { canDrawMap: false, mapButtonTooltip: `Location data error: ${locationDataError}` };
     }
 
-    // Check if all points in chosenClusters exist in locationData
     const clusterPoints = new Set(results.chosenClusters.flatMap(c => c.members));
     const locationPoints = new Set(locationData.map(l => l.point));
     
-    // Scenario: No clusters were formed, but location data is present. Allow drawing locations.
     if (clusterPoints.size === 0 && locationPoints.size > 0) {
         return { canDrawMap: true, mapButtonTooltip: "Draw available locations on map (no clusters to color)." };
     }
-    // Scenario: Clusters exist, but location data is empty. Cannot map.
     if (clusterPoints.size > 0 && locationPoints.size === 0) {
         return { canDrawMap: false, mapButtonTooltip: "Location data is empty, cannot map cluster points." };
     }
-
 
     for (const point of Array.from(clusterPoints)) {
       if (!locationPoints.has(point)) {
@@ -113,13 +107,33 @@ export default function HomePage() {
     return { canDrawMap: true, mapButtonTooltip: showMap ? "Hide map" : "Show clusters and locations on map" };
   }, [results, locationData, locationDataError, showMap]);
 
+  // Conditions for rendering map blocks
+  const shouldRenderMainMap = showMap && !!results && !!results.chosenClusters && results.chosenClusters.length > 0 && !!locationData && !locationDataError && canDrawMap;
+  const shouldRenderLocationsOnlyMap = showMap && !!locationData && !locationDataError && canDrawMap && (!results || !results.chosenClusters || results.chosenClusters.length === 0);
+
+  const prevMainMapConditionRef = useRef(shouldRenderMainMap);
+  const prevLocationsOnlyMapConditionRef = useRef(shouldRenderLocationsOnlyMap);
+
+  useEffect(() => {
+    const currentMainMapCondition = showMap && !!results && !!results.chosenClusters && results.chosenClusters.length > 0 && !!locationData && !locationDataError && canDrawMap;
+    const currentLocationsOnlyMapCondition = showMap && !!locationData && !locationDataError && canDrawMap && (!results || !results.chosenClusters || results.chosenClusters.length === 0);
+
+    if ((currentMainMapCondition && !prevMainMapConditionRef.current) || (currentLocationsOnlyMapCondition && !prevLocationsOnlyMapConditionRef.current)) {
+        setMapRenderKey(prevKey => prevKey + 1);
+    }
+
+    prevMainMapConditionRef.current = currentMainMapCondition;
+    prevLocationsOnlyMapConditionRef.current = currentLocationsOnlyMapCondition;
+  }, [showMap, results, locationData, locationDataError, canDrawMap]);
+
 
   const handleDrawOnMap = () => {
     if (canDrawMap) {
-      setShowMap(prev => !prev);
-      if (!showMap) { // Will be true if map is about to be shown
+      const newShowMapState = !showMap;
+      setShowMap(newShowMapState);
+      if (newShowMapState) { 
          toast({ title: "Map Display", description: "Showing locations on map. Points from clusters will be colored." });
-      } else { // Will be true if map is about to be hidden
+      } else { 
          toast({ title: "Map Display", description: "Map hidden." });
       }
     } else {
@@ -131,7 +145,7 @@ export default function HomePage() {
       })
     }
   };
-
+  
   return (
     <>
       <SiteHeader />
@@ -160,8 +174,7 @@ export default function HomePage() {
 
         <ClusterResultsDisplay results={results} isProcessing={processingStatus !== 'idle'} />
 
-        {/* Map Button and related Alerts */}
-        {(results || locationData) && processingStatus === 'idle' && ( // Show button container if results or location data exists and not processing
+        {(results || locationData) && processingStatus === 'idle' && (
             <div className="w-full max-w-lg flex flex-col items-center space-y-4">
                 {locationDataError && (
                     <Alert variant="destructive" className="w-full">
@@ -170,7 +183,6 @@ export default function HomePage() {
                         <AlertDescription>{locationDataError}</AlertDescription>
                     </Alert>
                 )}
-                {/* Show button if there are results OR if there's only location data (to draw unclustered points) */}
                 {(results && results.chosenClusters && results.chosenClusters.length > 0) || (locationData && (!results || !results.chosenClusters || results.chosenClusters.length === 0)) ? (
                     <Button onClick={handleDrawOnMap} disabled={!canDrawMap} title={mapButtonTooltip}>
                         <MapIcon className="mr-2 h-5 w-5" />
@@ -189,30 +201,28 @@ export default function HomePage() {
         )}
 
 
-        {showMap && results && locationData && canDrawMap && (
+        {shouldRenderMainMap && (
           <div
-            key={mapRenderKey} 
+            key={`map-main-${mapRenderKey}`} 
             className="w-full max-w-4xl h-[500px] mt-8 rounded-lg shadow-xl border overflow-hidden"
           >
             <ClusterMapDisplay
-              clusters={results.chosenClusters || []} 
-              locations={locationData}
+              clusters={results!.chosenClusters!} 
+              locations={locationData!}
             />
           </div>
         )}
-         {/* Fallback to show map with only locations if no clusters but map is requested and locationData exists */}
-        {showMap && !results?.chosenClusters?.length && locationData && canDrawMap && (
+        {shouldRenderLocationsOnlyMap && (
              <div
-                key={mapRenderKey + '_locations_only'} 
+                key={`map-loc-only-${mapRenderKey}`}
                 className="w-full max-w-4xl h-[500px] mt-8 rounded-lg shadow-xl border overflow-hidden"
             >
                 <ClusterMapDisplay
                 clusters={[]} 
-                locations={locationData}
+                locations={locationData!}
                 />
             </div>
         )}
-
 
       </main>
       <footer className="py-6 px-4 text-center text-sm text-muted-foreground border-t">
@@ -221,3 +231,4 @@ export default function HomePage() {
     </>
   );
 }
+
