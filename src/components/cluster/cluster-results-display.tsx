@@ -4,11 +4,12 @@
 import type { ClusteringResult, ClusterMetric } from '@/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { CheckCircle, AlertTriangle, XCircle, Info, BarChart2, LineChart } from 'lucide-react';
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis, LabelList, ResponsiveContainer, Legend, Tooltip as RechartsTooltip } from 'recharts';
+import { CheckCircle, AlertTriangle, XCircle, Info, LineChart } from 'lucide-react';
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis, LabelList, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import {
   ChartConfig,
   ChartContainer,
+  ChartTooltip, // Added ChartTooltip import
   ChartTooltipContent,
 } from "@/components/ui/chart";
 
@@ -221,6 +222,7 @@ export function ClusterResultsDisplay({ results, isProcessing }: ClusterResultsD
                         radius={4}
                     >
                         {metricsChartData.map((entry, index) => (
+                            // @ts-ignore Recharts type issue with custom component in Bar
                             <rect key={`bar-${index}`} fill={entry.k === results.chosenK ? "hsl(var(--primary))" : "hsl(var(--chart-2))"} />
                         ))}
                          <LabelList dataKey="totalIntraClusterDistance" position="top" offset={8} className="fill-foreground" fontSize={10} formatter={(value: number) => value.toFixed(0)} />
@@ -236,3 +238,4 @@ export function ClusterResultsDisplay({ results, isProcessing }: ClusterResultsD
     </div>
   );
 }
+
