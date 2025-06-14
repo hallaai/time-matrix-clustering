@@ -46,14 +46,20 @@ export default function HomePage() {
     if (processingStatus === 'clustering') {
       setClusteringProgress(0);
       let currentProgress = 0;
+      const totalDuration = 1500; // Corresponds to sleep in actions.ts
+      const steps = 20; // Number of updates
+      const increment = 100 / steps;
+      const intervalTime = totalDuration / steps;
+
       interval = setInterval(() => {
-        currentProgress += 5;
+        currentProgress += increment;
         if (currentProgress <= 100) {
           setClusteringProgress(currentProgress);
         } else {
+          setClusteringProgress(100); // Ensure it hits 100
           clearInterval(interval);
         }
-      }, 75);
+      }, intervalTime);
     } else {
       setClusteringProgress(0);
     }
@@ -75,48 +81,53 @@ export default function HomePage() {
   };
 
   const { canDrawMap, mapButtonTooltip } = useMemo(() => {
-    if (!results || !results.clusters || results.clusters.length === 0) {
-      return { canDrawMap: false, mapButtonTooltip: "Perform clustering first." };
+    if (!results || !results.chosenClusters || results.chosenClusters.length === 0) {
+      return { canDrawMap: false, mapButtonTooltip: "Perform clustering first or no valid clusters were formed." };
     }
     if (!locationData) {
-      return { canDrawMap: false, mapButtonTooltip: "Upload valid location data." };
+      return { canDrawMap: false, mapButtonTooltip: "Upload valid location data to enable map display." };
     }
     if (locationDataError) {
         return { canDrawMap: false, mapButtonTooltip: `Location data error: ${locationDataError}` };
     }
 
-    const clusterPoints = new Set(results.clusters.flatMap(c => c.members));
+    // Check if all points in chosenClusters exist in locationData
+    const clusterPoints = new Set(results.chosenClusters.flatMap(c => c.members));
     const locationPoints = new Set(locationData.map(l => l.point));
-
+    
+    // Scenario: No clusters were formed, but location data is present. Allow drawing locations.
     if (clusterPoints.size === 0 && locationPoints.size > 0) {
         return { canDrawMap: true, mapButtonTooltip: "Draw available locations on map (no clusters to color)." };
     }
+    // Scenario: Clusters exist, but location data is empty. Cannot map.
     if (clusterPoints.size > 0 && locationPoints.size === 0) {
         return { canDrawMap: false, mapButtonTooltip: "Location data is empty, cannot map cluster points." };
     }
 
+
     for (const point of Array.from(clusterPoints)) {
       if (!locationPoints.has(point)) {
-        return { canDrawMap: false, mapButtonTooltip: `Point ${point} from clusters not found in location data.` };
+        return { canDrawMap: false, mapButtonTooltip: `Point ${point} from clusters not found in location data. Please check your locations file.` };
       }
     }
-    return { canDrawMap: true, mapButtonTooltip: "Show clusters on map" };
-  }, [results, locationData, locationDataError]);
+    return { canDrawMap: true, mapButtonTooltip: showMap ? "Hide map" : "Show clusters and locations on map" };
+  }, [results, locationData, locationDataError, showMap]);
 
 
   const handleDrawOnMap = () => {
     if (canDrawMap) {
       setShowMap(prev => !prev);
-      if (!showMap) {
+      if (!showMap) { // Will be true if map is about to be shown
          toast({ title: "Map Display", description: "Showing locations on map. Points from clusters will be colored." });
-      } else {
+      } else { // Will be true if map is about to be hidden
          toast({ title: "Map Display", description: "Map hidden." });
       }
     } else {
       toast({
         title: "Cannot Draw Map",
         description: mapButtonTooltip,
-        variant: "destructive"
+        variant: "destructive",
+        duration: 7000,
       })
     }
   };
@@ -143,46 +154,65 @@ export default function HomePage() {
             <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
             <p className="text-lg font-medium">Analyzing Clusters...</p>
             <Progress value={clusteringProgress} className="w-3/4 mt-2 mb-1" />
-            <p className="text-sm">{clusteringProgress}%</p>
+            <p className="text-sm">{clusteringProgress.toFixed(0)}%</p>
           </div>
         )}
 
         <ClusterResultsDisplay results={results} isProcessing={processingStatus !== 'idle'} />
 
-        {results && results.clusters && results.clusters.length > 0 && (
-          <div className="w-full max-w-lg flex justify-center">
-            <Button onClick={handleDrawOnMap} disabled={!canDrawMap} title={mapButtonTooltip}>
-              <MapIcon className="mr-2 h-5 w-5" />
-              {showMap ? "Hide Map" : "Draw on Map"}
-            </Button>
-          </div>
-        )}
-         {locationDataError && (
-            <Alert variant="destructive" className="w-full max-w-lg">
-                <AlertTriangle className="h-5 w-5" />
-                <AlertTitle>Location Data Error</AlertTitle>
-                <AlertDescription>{locationDataError}</AlertDescription>
-            </Alert>
+        {/* Map Button and related Alerts */}
+        {(results || locationData) && processingStatus === 'idle' && ( // Show button container if results or location data exists and not processing
+            <div className="w-full max-w-lg flex flex-col items-center space-y-4">
+                {locationDataError && (
+                    <Alert variant="destructive" className="w-full">
+                        <AlertTriangle className="h-5 w-5" />
+                        <AlertTitle>Location Data Error</AlertTitle>
+                        <AlertDescription>{locationDataError}</AlertDescription>
+                    </Alert>
+                )}
+                {/* Show button if there are results OR if there's only location data (to draw unclustered points) */}
+                {(results && results.chosenClusters && results.chosenClusters.length > 0) || (locationData && (!results || !results.chosenClusters || results.chosenClusters.length === 0)) ? (
+                    <Button onClick={handleDrawOnMap} disabled={!canDrawMap} title={mapButtonTooltip}>
+                        <MapIcon className="mr-2 h-5 w-5" />
+                        {showMap ? "Hide Map" : "Draw on Map"}
+                    </Button>
+                ) : null}
+
+                {!showMap && locationData && !canDrawMap && mapButtonTooltip && mapButtonTooltip.includes("not found in location data") && (
+                     <Alert variant="destructive" className="w-full">
+                        <AlertTriangle className="h-5 w-5" />
+                        <AlertTitle>Map Data Mismatch</AlertTitle>
+                        <AlertDescription>{mapButtonTooltip} Please ensure location data includes all points present in your clusters.</AlertDescription>
+                    </Alert>
+                 )}
+            </div>
         )}
 
-        {showMap && results && locationData && (
+
+        {showMap && results && locationData && canDrawMap && (
           <div
-            key={mapRenderKey} // Moved key to the parent div
+            key={mapRenderKey} 
             className="w-full max-w-4xl h-[500px] mt-8 rounded-lg shadow-xl border overflow-hidden"
           >
             <ClusterMapDisplay
-              clusters={results.clusters || []}
+              clusters={results.chosenClusters || []} 
               locations={locationData}
             />
           </div>
         )}
-         {!showMap && results && results.clusters && results.clusters.length > 0 && locationData && !canDrawMap && mapButtonTooltip && mapButtonTooltip.includes("not found in location data") && (
-             <Alert variant="destructive" className="w-full max-w-lg">
-                <AlertTriangle className="h-5 w-5" />
-                <AlertTitle>Map Data Mismatch</AlertTitle>
-                <AlertDescription>{mapButtonTooltip} Please ensure location data includes all points present in your clusters.</AlertDescription>
-            </Alert>
-         )}
+         {/* Fallback to show map with only locations if no clusters but map is requested and locationData exists */}
+        {showMap && !results?.chosenClusters?.length && locationData && canDrawMap && (
+             <div
+                key={mapRenderKey + '_locations_only'} 
+                className="w-full max-w-4xl h-[500px] mt-8 rounded-lg shadow-xl border overflow-hidden"
+            >
+                <ClusterMapDisplay
+                clusters={[]} 
+                locations={locationData}
+                />
+            </div>
+        )}
+
 
       </main>
       <footer className="py-6 px-4 text-center text-sm text-muted-foreground border-t">
