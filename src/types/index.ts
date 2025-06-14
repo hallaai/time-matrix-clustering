@@ -22,8 +22,16 @@ export interface ClusteringRequestData extends ClusteringParams {
   distanceMatrix: DistanceMatrix;
 }
 
+export interface ClusterMetric {
+  k: number;
+  totalIntraClusterDistance: number;
+  numberOfValidClusters: number;
+}
+
 export interface ClusteringResult {
-  clusters?: Cluster[];
+  chosenClusters?: Cluster[];
+  chosenK?: number;
+  allMetrics?: ClusterMetric[];
   warning?: string;
   error?: string; // For critical API call errors
 }

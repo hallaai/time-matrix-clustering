@@ -1,7 +1,7 @@
 
 "use server";
 
-import type { DistanceMatrix, ClusteringParams, ClusteringResult } from '@/types';
+import type { DistanceMatrix, ClusteringParams, ClusteringResult, Cluster, ClusterMetric } from '@/types';
 import { DistanceMatrixSchema } from '@/lib/schemas';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -39,6 +39,140 @@ function getDistance(node1: number, node2: number, distanceMap: Map<number, Map<
     return distanceMap.get(node1)?.get(node2) ?? Infinity;
 }
 
+// K-Medoids simulation for a specific k
+async function runKMedoidsSimulation(
+    targetK: number,
+    uniqueNodes: number[],
+    distanceMap: Map<number, Map<number, number>>,
+    minClusterSize: number
+): Promise<{ clusters: Cluster[], totalIntraClusterDistance: number }> {
+    if (targetK <= 0 || targetK > uniqueNodes.length) {
+        return { clusters: [], totalIntraClusterDistance: Infinity };
+    }
+
+    const maxIterations = 10;
+    let currentMedoids = shuffleArray([...uniqueNodes]).slice(0, targetK);
+    
+    if (currentMedoids.length < targetK) {
+         // Not enough unique nodes to form targetK medoids (should be caught before calling, but safeguard)
+        return { clusters: [], totalIntraClusterDistance: Infinity };
+    }
+
+    let previousMedoidsJSON = "";
+
+    for (let iter = 0; iter < maxIterations; iter++) {
+        const currentClustersMap = new Map<number, number[]>(); // medoidId -> list of memberIds
+        currentMedoids.forEach(m => currentClustersMap.set(m, []));
+
+        // Assignment step
+        for (const node of uniqueNodes) {
+            let closestMedoid = -1;
+            let minDistance = Infinity;
+            for (const medoid of currentMedoids) {
+                const dist = getDistance(node, medoid, distanceMap);
+                if (dist < minDistance) {
+                    minDistance = dist;
+                    closestMedoid = medoid;
+                }
+            }
+            if (closestMedoid !== -1) {
+                currentClustersMap.get(closestMedoid)!.push(node);
+            }
+        }
+
+        // Update step
+        const newMedoids: number[] = [];
+        for (const medoid of currentMedoids) {
+            const members = currentClustersMap.get(medoid) || [];
+            if (members.length === 0) { // This medoid lost all members
+                // Re-initialize this medoid from a random member if possible or keep it
+                const randomMemberForLostMedoid = uniqueNodes[Math.floor(Math.random() * uniqueNodes.length)];
+                newMedoids.push(randomMemberForLostMedoid); 
+                continue;
+            }
+
+            let bestNewMedoidForCluster = members[0];
+            let minSumDist = Infinity;
+            for (const potentialMedoid of members) {
+                let currentSumDist = 0;
+                for (const member of members) {
+                    currentSumDist += getDistance(potentialMedoid, member, distanceMap);
+                }
+                if (currentSumDist < minSumDist) {
+                    minSumDist = currentSumDist;
+                    bestNewMedoidForCluster = potentialMedoid;
+                }
+            }
+            newMedoids.push(bestNewMedoidForCluster);
+        }
+        
+        currentMedoids = [...new Set(newMedoids)]; // Ensure unique medoids
+        
+        // Refill if medoids count dropped below targetK
+        if (currentMedoids.length < targetK) {
+            const existingMedoidsSet = new Set(currentMedoids);
+            const availableNodesForRefill = uniqueNodes.filter(n => !existingMedoidsSet.has(n));
+            const shuffledAvailable = shuffleArray(availableNodesForRefill);
+            let needed = targetK - currentMedoids.length;
+            for(let i=0; i < needed && i < shuffledAvailable.length; i++){
+                currentMedoids.push(shuffledAvailable[i]);
+            }
+        }
+        if (currentMedoids.length < targetK) { // Still not enough, abort for this k
+             return { clusters: [], totalIntraClusterDistance: Infinity };
+        }
+        
+        const sortedMedoidsJSON = JSON.stringify([...currentMedoids].sort((a,b)=>a-b));
+        if (previousMedoidsJSON === sortedMedoidsJSON) {
+          break; // Converged
+        }
+        previousMedoidsJSON = sortedMedoidsJSON;
+    }
+
+    // Final assignment and calculation
+    const finalClusterMap = new Map<number, number[]>();
+    currentMedoids.forEach(m => finalClusterMap.set(m, []));
+
+    for (const node of uniqueNodes) {
+        let closestMedoid = -1;
+        let minDistance = Infinity;
+        for (const medoid of currentMedoids) {
+          const dist = getDistance(node, medoid, distanceMap);
+          if (dist < minDistance) {
+            minDistance = dist;
+            closestMedoid = medoid;
+          }
+        }
+        if (closestMedoid !== -1) {
+          finalClusterMap.get(closestMedoid)!.push(node);
+        }
+    }
+    
+    const formedClusters: Cluster[] = [];
+    let clusterIdCounter = 1;
+    let totalIntraClusterDistance = 0;
+
+    for (const medoid of currentMedoids) {
+        const members = finalClusterMap.get(medoid) || [];
+        if (members.length >= minClusterSize) {
+            formedClusters.push({ id: clusterIdCounter++, members: members.sort((a, b) => a - b) });
+            // Calculate intra-cluster distance for this valid cluster
+            for (const member of members) {
+                if (member !== medoid) { // Distance from medoid to itself is 0
+                    totalIntraClusterDistance += getDistance(medoid, member, distanceMap);
+                }
+            }
+        }
+    }
+    
+    // If no valid clusters were formed that meet minClusterSize, distance is effectively Infinity
+    if (formedClusters.length === 0 && targetK > 0) {
+        return { clusters: [], totalIntraClusterDistance: Infinity };
+    }
+
+    return { clusters: formedClusters.sort((a,b) => a.id - b.id), totalIntraClusterDistance };
+}
+
 
 export async function runClusteringAlgorithm(
   distanceMatrixString: string,
@@ -63,20 +197,10 @@ export async function runClusteringAlgorithm(
   if (!parsedMatrix || parsedMatrix.length === 0) {
     return { warning: "No data provided in the distance matrix or the file is empty." };
   }
-
-  if (params.minClusters <= 0) {
-    return { warning: "Minimum number of clusters must be positive."};
-  }
-   if (params.maxClusters <= 0) {
-    return { warning: "Maximum number of clusters must be positive."};
-  }
-  if (params.minClusters > params.maxClusters) {
-    return { warning: "Minimum clusters cannot be greater than maximum clusters." };
-  }
-  if (params.minClusterSize <= 0) {
-    return { warning: "Minimum cluster size must be positive." };
-  }
   
+  const baseParamWarnings = validateBaseParams(params);
+  if (baseParamWarnings) return { warning: baseParamWarnings };
+
   const allNodesSet = new Set<number>();
   parsedMatrix.forEach(entry => {
     allNodesSet.add(entry.from);
@@ -85,186 +209,85 @@ export async function runClusteringAlgorithm(
   const uniqueNodes = Array.from(allNodesSet);
   const uniqueNodesCount = uniqueNodes.length;
 
-  if (uniqueNodesCount === 0) {
-    return { warning: "No unique data points found in the distance matrix." };
-  }
-
-  if (uniqueNodesCount < params.minClusters) {
-     return { warning: `Cannot form ${params.minClusters} clusters from only ${uniqueNodesCount} unique data points. Reduce min clusters or provide more data.` };
-  }
-   if (uniqueNodesCount < params.minClusterSize) {
-    return { warning: `Cannot form clusters of size ${params.minClusterSize} from only ${uniqueNodesCount} data points. Reduce min cluster size or provide more data.` };
-  }
-
-  if (uniqueNodesCount < params.minClusters * params.minClusterSize && params.minClusters > 0) {
-    return {
-      warning: `It's likely impossible to form ${params.minClusters} clusters, each with at least ${params.minClusterSize} members, from only ${uniqueNodesCount} unique data points.
-      Suggestions:
-      - Reduce the minimum number of clusters.
-      - Reduce the minimum cluster size.`
-    };
-  }
+  const nodeCountWarnings = validateNodeCounts(uniqueNodesCount, params);
+  if (nodeCountWarnings) return { warning: nodeCountWarnings};
   
   const distanceMap = buildDistanceMap(parsedMatrix, allNodesSet);
   
-  const k = Math.min(params.maxClusters, Math.max(params.minClusters, Math.floor(uniqueNodesCount / params.minClusterSize) || 1));
-  if (k <= 0 && uniqueNodesCount > 0) {
-     return { warning: `Could not determine a valid number of clusters (k=${k}) based on parameters. Ensure minClusterSize allows for cluster formation.`}
-  }
-   if (k > uniqueNodesCount) {
-    return { warning: `Target number of clusters (k=${k}) is greater than the number of unique nodes (${uniqueNodesCount}). Adjust parameters.`}
-  }
+  const allMetrics: ClusterMetric[] = [];
+  let bestK = -1;
+  let minTotalIntraClusterDistance = Infinity;
+  let bestClusters: Cluster[] = [];
+  let overallWarning: string | undefined = undefined;
 
-
-  const maxIterations = 10;
-  let currentMedoids = shuffleArray([...uniqueNodes]).slice(0, k);
-  if (currentMedoids.length < k) {
-      return { warning: `Not enough unique nodes (${currentMedoids.length}) to select ${k} initial medoids. Adjust parameters or data.` };
-  }
-
-  let currentClusters: Map<number, number[]>; // medoidId -> list of memberIds
-  let previousMedoids: number[] = [];
-
-  for (let iter = 0; iter < maxIterations; iter++) {
-    currentClusters = new Map();
-    currentMedoids.forEach(m => currentClusters.set(m, []));
-
-    // Assignment step
-    for (const node of uniqueNodes) {
-      let closestMedoid = -1;
-      let minDistance = Infinity;
-      for (const medoid of currentMedoids) {
-        const dist = getDistance(node, medoid, distanceMap);
-        if (dist < minDistance) {
-          minDistance = dist;
-          closestMedoid = medoid;
-        }
-      }
-      if (closestMedoid !== -1) {
-        currentClusters.get(closestMedoid)!.push(node);
-      }
+  for (let k = params.minClusters; k <= params.maxClusters; k++) {
+    if (k > uniqueNodesCount) {
+        allMetrics.push({ k, totalIntraClusterDistance: Infinity, numberOfValidClusters: 0 });
+        continue; // Cannot form k clusters if k > number of unique nodes
+    }
+    if (k * params.minClusterSize > uniqueNodesCount && k > 0) {
+        allMetrics.push({ k, totalIntraClusterDistance: Infinity, numberOfValidClusters: 0 });
+        continue; // Not enough nodes for k clusters of minClusterSize
     }
 
-    // Update step
-    const newMedoids: number[] = [];
-    let medoidChangedInIteration = false;
-    for (const medoid of currentMedoids) {
-        const members = currentClusters.get(medoid) || [];
-        if (members.length === 0) { // This medoid lost all members
-            // Try to re-initialize this medoid or pick a different one if needed
-            // For simplicity, we might lose a medoid here if not careful
-            // A robust way would be to ensure k medoids are always present
-            continue; 
-        }
+    const resultForK = await runKMedoidsSimulation(k, uniqueNodes, distanceMap, params.minClusterSize);
+    allMetrics.push({ 
+        k, 
+        totalIntraClusterDistance: resultForK.totalIntraClusterDistance,
+        numberOfValidClusters: resultForK.clusters.length 
+    });
 
-        let bestNewMedoidForCluster = members[0];
-        let minSumDist = Infinity;
-
-        for (const potentialMedoid of members) {
-            let currentSumDist = 0;
-            for (const member of members) {
-                currentSumDist += getDistance(potentialMedoid, member, distanceMap);
-            }
-            if (currentSumDist < minSumDist) {
-                minSumDist = currentSumDist;
-                bestNewMedoidForCluster = potentialMedoid;
-            }
-        }
-        newMedoids.push(bestNewMedoidForCluster);
-        if (bestNewMedoidForCluster !== medoid) {
-            medoidChangedInIteration = true;
-        }
-    }
-    
-    // Ensure unique medoids; if duplicates, refill strategy might be needed
-    currentMedoids = [...new Set(newMedoids)]; 
-    // If we have fewer medoids than k due to convergence, refill
-    if (currentMedoids.length < k) {
-        const existingMedoidsSet = new Set(currentMedoids);
-        const availableNodesForRefill = uniqueNodes.filter(n => !existingMedoidsSet.has(n));
-        const shuffledAvailable = shuffleArray(availableNodesForRefill);
-        let needed = k - currentMedoids.length;
-        for(let i=0; i<needed && i < shuffledAvailable.length; i++){
-            currentMedoids.push(shuffledAvailable[i]);
-        }
-    }
-     if (currentMedoids.length < k) { // Still not enough medoids (e.g. uniqueNodesCount < k)
-         // This situation should be caught earlier, but as a safeguard.
-         return { warning: `Could not maintain ${k} distinct medoids during iterations. Current medoids: ${currentMedoids.length}. Adjust parameters.`}
-     }
-
-
-    // Check for convergence (if medoids didn't change and iteration > 0)
-    const sortedCurrentMedoids = [...currentMedoids].sort((a,b) => a-b);
-    const sortedPreviousMedoids = [...previousMedoids].sort((a,b) => a-b);
-
-    if (iter > 0 && !medoidChangedInIteration && 
-        sortedCurrentMedoids.length === sortedPreviousMedoids.length &&
-        sortedCurrentMedoids.every((val, index) => val === sortedPreviousMedoids[index])) {
-      break; 
-    }
-    previousMedoids = [...currentMedoids];
-  }
-
-  // Final assignment based on final medoids
-  const finalClusterMap = new Map<number, number[]>();
-  currentMedoids.forEach(m => finalClusterMap.set(m, []));
-
-  for (const node of uniqueNodes) {
-    let closestMedoid = -1;
-    let minDistance = Infinity;
-    for (const medoid of currentMedoids) {
-      const dist = getDistance(node, medoid, distanceMap);
-      if (dist < minDistance) {
-        minDistance = dist;
-        closestMedoid = medoid;
-      }
-    }
-    if (closestMedoid !== -1) {
-      finalClusterMap.get(closestMedoid)!.push(node);
+    if (resultForK.clusters.length > 0 && resultForK.totalIntraClusterDistance < minTotalIntraClusterDistance) {
+        minTotalIntraClusterDistance = resultForK.totalIntraClusterDistance;
+        bestK = k;
+        bestClusters = resultForK.clusters;
     }
   }
 
-  let resultClusters: ClusteringResult['clusters'] = [];
-  let clusterIdCounter = 1;
-  for (const members of finalClusterMap.values()) {
-    if (members.length >= params.minClusterSize) {
-      resultClusters.push({ id: clusterIdCounter++, members: members.sort((a, b) => a - b) });
-    }
+  if (bestK === -1 && uniqueNodesCount > 0) { // No k yielded valid clusters
+    overallWarning = `The algorithm did not form any clusters satisfying the minimum size of ${params.minClusterSize} for any k between ${params.minClusters} and ${params.maxClusters}.
+    Suggestions:
+    - Reduce minimum cluster size.
+    - Data might be too sparse or constraints too strict.`;
+    return { allMetrics, warning: overallWarning };
+  } else if (bestK !== -1 && bestClusters.length < params.minClusters && params.minClusters > 0) {
+     overallWarning = `The best solution found has ${bestClusters.length} clusters (for k=${bestK}), which is less than the desired minimum of ${params.minClusters}.
+     Consider adjusting parameters if more clusters are strictly required.`;
+  } else if (bestK === -1 && uniqueNodesCount === 0) {
+    overallWarning = "No unique data points found in the distance matrix to perform clustering.";
+    return { warning: overallWarning };
   }
-  
-  // Sort clusters by ID for consistent output order
-  resultClusters.sort((a, b) => a.id - b.id);
 
-  if (resultClusters.length === 0 && uniqueNodesCount > 0) {
-    return {
-      warning: `The algorithm did not form any clusters satisfying the minimum size of ${params.minClusterSize} from ${uniqueNodesCount} unique data points.
-      Suggestions:
-      - Reduce minimum cluster size.
-      - Adjust min/max number of clusters.
-      - Data might be too sparse or constraints too strict for this simplified algorithm.`
-    };
-  }
-  
-  let warningMessage: string | undefined = undefined;
-  if (resultClusters.length > 0 && resultClusters.length < params.minClusters) {
-     warningMessage = `Could only form ${resultClusters.length} clusters satisfying the minimum size. This is less than the desired minimum of ${params.minClusters} clusters.
-     Suggestions:
-     - Reduce minimum cluster size or minimum number of clusters.
-     - The data might be too sparse for the given constraints.`;
-  }
-  
-  if (resultClusters.length > params.maxClusters) {
-      // This is unlikely if k was capped by maxClusters, but as a safeguard
-      resultClusters = resultClusters.slice(0, params.maxClusters);
-      const newWarning = `Formed ${resultClusters.length} clusters, but truncated to the maximum allowed ${params.maxClusters}.`;
-      warningMessage = warningMessage ? `${warningMessage}\n${newWarning}` : newWarning;
-  }
 
   return {
-    clusters: resultClusters,
-    warning: warningMessage
+    chosenClusters: bestClusters,
+    chosenK: bestK,
+    allMetrics,
+    warning: overallWarning
   };
 }
 
-    
+
+function validateBaseParams(params: ClusteringParams): string | undefined {
+  if (params.minClusters <= 0) return "Minimum number of clusters must be positive.";
+  if (params.maxClusters <= 0) return "Maximum number of clusters must be positive.";
+  if (params.minClusters > params.maxClusters) return "Minimum clusters cannot be greater than maximum clusters.";
+  if (params.minClusterSize <= 0) return "Minimum cluster size must be positive.";
+  return undefined;
+}
+
+function validateNodeCounts(uniqueNodesCount: number, params: ClusteringParams): string | undefined {
+  if (uniqueNodesCount === 0) return "No unique data points found in the distance matrix.";
+  if (uniqueNodesCount < params.minClusters && params.minClusters > 0) { // Check params.minClusters > 0 to avoid warning if minClusters is 0 or less (already caught by baseParamWarnings)
+     return `Cannot form ${params.minClusters} clusters from only ${uniqueNodesCount} unique data points. Reduce min clusters or provide more data.`;
+  }
+   if (uniqueNodesCount < params.minClusterSize && params.minClusterSize > 0) {
+    return `Cannot form clusters of size ${params.minClusterSize} from only ${uniqueNodesCount} data points. Reduce min cluster size or provide more data.`;
+  }
+  // This check is now implicitly handled by the loop in runClusteringAlgorithm, 
+  // but keeping a general warning if initial minClusters * minClusterSize is impossible.
+  if (uniqueNodesCount < params.minClusters * params.minClusterSize && params.minClusters > 0 && params.minClusterSize > 0) {
+    return `It's likely impossible to form ${params.minClusters} clusters, each with at least ${params.minClusterSize} members, from only ${uniqueNodesCount} unique data points. The algorithm will attempt iterations, but consider adjusting parameters.`;
+  }
+  return undefined;
+}
